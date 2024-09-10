@@ -1,0 +1,4 @@
+Makefile*
+release/
+debug/
+*.stash
