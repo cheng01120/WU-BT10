@@ -24,8 +24,7 @@ typedef uint32_t u32;
 #include "teVirtualMIDI.h"
 #pragma comment(lib, "teVirtualMIDI64")
 
-class Event {
-	public:
+struct Event {
 		u32 ts;  // ms.
 		u8 key; 
 		u8 channel;

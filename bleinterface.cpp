@@ -86,7 +86,7 @@ void BLEInterface::scanDevices()
     m_devices.clear();
     emit devicesNamesChanged(m_devicesNames);
     m_deviceDiscoveryAgent->start();
-    emit statusInfoChanged("Scanning for devices...", true);
+    qInfo("Scanning for devices...");
 }
 
 void BLEInterface::read(){
@@ -136,27 +136,26 @@ void BLEInterface::addDevice(const QBluetoothDeviceInfo &device)
         m_devices.append(dev);
     		m_deviceDiscoveryAgent->stop();
         emit devicesNamesChanged(m_devicesNames);
-        emit statusInfoChanged("Low Energy device found. Scanning for service...", true);
+        qInfo("Low Energy device found. Scanning for service...");
+        emit statusInfoChanged("Done.", true);
 				connectCurrentDevice();
 			}
     }
-    //...
 }
 
 void BLEInterface::onScanFinished()
 {
-    if (m_devicesNames.size() == 0)
-        emit statusInfoChanged("No Low Energy devices found", false);
+    if (m_devicesNames.size() == 0) qInfo("No Low Energy devices found.");
 }
 
 void BLEInterface::onDeviceScanError(QBluetoothDeviceDiscoveryAgent::Error error)
 {
     if (error == QBluetoothDeviceDiscoveryAgent::PoweredOffError)
-        emit statusInfoChanged("The Bluetooth adaptor is powered off, power it on before doing discovery.", false);
+        qInfo("The Bluetooth adaptor is powered off, power it on before doing discovery.");
     else if (error == QBluetoothDeviceDiscoveryAgent::InputOutputError)
-        emit statusInfoChanged("Writing or reading from the device resulted in an error.", false);
+        qInfo("Writing or reading from the device resulted in an error.");
     else
-        emit statusInfoChanged("An unknown error has occurred.", false);
+        qInfo("An unknown error has occurred.");
 }
 
 
@@ -206,14 +205,14 @@ void BLEInterface::onDeviceDisconnected()
 void BLEInterface::onServiceDiscovered(const QBluetoothUuid &gatt)
 {
     Q_UNUSED(gatt)
-    emit statusInfoChanged("Service discovered. Waiting for service scan to be done...", true);
+    qInfo("Service discovered. Waiting for service scan to be done...");
 }
 
 void BLEInterface::onServiceScanDone()
 {
     m_servicesUuid = m_control->services();
     if(m_servicesUuid.isEmpty())
-        emit statusInfoChanged("Can't find any services.", true);
+        qInfo("Can't find any services.");
     else{
 			  std::reverse(m_servicesUuid.begin(), m_servicesUuid.end());
         m_services.clear();
@@ -222,7 +221,7 @@ void BLEInterface::onServiceScanDone()
         emit servicesChanged(m_services);
         m_currentService = -1;// to force call update_currentService(once)
         setCurrentService(0);
-        emit statusInfoChanged("All services discovered.", true);
+        qInfo("All services discovered.");
 
 				openVirtualMIDIPort();
 				m_elapsed.start();
@@ -261,7 +260,7 @@ void BLEInterface::disconnectDevice()
 
 void BLEInterface::onControllerError(QLowEnergyController::Error error)
 {
-    emit statusInfoChanged("Cannot connect to remote device.", false);
+    qInfo("Cannot connect to remote device.");
     qWarning() << "Controller Error:" << error;
 }
 
@@ -269,14 +268,17 @@ void BLEInterface::onCharacteristicChanged(const QLowEnergyCharacteristic &c,
                                            const QByteArray &value)
 {
     Q_UNUSED(c)
-    emit dataReceived(value);
+    //emit dataReceived(value);
 		parseBLEPacket(value);
 }
 
 void BLEInterface::parseBLEPacket(const QByteArray& value)
 {
 	u8 ss = value.size() -1;
-	if(ss & 0x03) return;
+	if(ss & 0x03)  {
+		qWarning() << "Unsupported message : " << value.toHex(':').toUpper();
+		return;
+	}
 
 	u8 high = value[0] & 0b00111111;
 	u8 low  = value[1] & 0b01111111;
@@ -290,11 +292,13 @@ void BLEInterface::parseBLEPacket(const QByteArray& value)
 		u8 st      = value[i+1] & 0xf0;
 		u8 channel = value[i+1] & 0x0f;
 		u8 key     = value[i+2];
+		u8 vel     = value[i+3];
 
 		// 发送note on之前先检查是否没有note off的key
-		if(st == 0x90) { // note on 
+		if((st == 0x90) && vel) { // note on 
 			for(int i = 0; i < events.size(); i++) {
 				if((events[i].key == key) && (events[i].channel == channel)) {
+					qWarning() << "Repeat Note on for key: " << events[i].key;
 					sendNoteOff(key, channel);
 					events.removeAt(i);
 					break;
@@ -303,14 +307,14 @@ void BLEInterface::parseBLEPacket(const QByteArray& value)
 			events.push_back(Event(m_elapsed.elapsed(), key, channel)); // keep track of note on'd keys.
 		}
 
-		if( st == 0x80) { // note off
+		if( (st == 0x80) || ( (st == 0x90) && !vel))  { // note off
 			for(int i = 0; i < events.size(); i++) {
 				if(events[i].key == key && events[i].channel == channel) {
 					events.removeAt(i);
 					break;
 				}
 			}
-			qInfo() << "Note on key: " << events.size();
+			//qInfo() << "No. of keys is staill on: " << events.size();
 		}
 
 		Sleep(t1 - t0);
@@ -339,7 +343,7 @@ void BLEInterface::update_currentService(int indx)
     }
 
     if (!m_service) {
-        emit statusInfoChanged("Service not found.", false);
+        qInfo("Service not found.");
         return;
     }
 
@@ -355,7 +359,7 @@ void BLEInterface::update_currentService(int indx)
             this, SLOT(serviceError(QLowEnergyService::ServiceError)));
 
     if(m_service->state() == QLowEnergyService::DiscoveryRequired) {
-        emit statusInfoChanged("Connecting to service...", true);
+        qInfo("Connecting to service...");
         m_service->discoverDetails();
     }
     else
@@ -399,7 +403,6 @@ void BLEInterface::searchCharacteristic(){
     }
 }
 
-
 void BLEInterface::onServiceStateChanged(QLowEnergyService::ServiceState s)
 {
     //qDebug() << "serviceStateChanged, state: " << s;
@@ -420,6 +423,7 @@ void BLEInterface::checkNoteOnTooLong()
 	int i = 0;
 	while(i < events.size()) {
 		if(now - events[i].ts > MAX_NOTE_ON_MS) {
+			qWarning() << "Key " << events[i].key << " note on too long.";
 			sendNoteOff(events[i].key, events[i].channel);
 			events.removeAt(i);
 		}
