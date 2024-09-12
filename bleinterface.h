@@ -139,14 +139,15 @@ private:
     QLowEnergyCharacteristic m_writeCharacteristic;
     QList<DeviceInfo*> m_devices;
 //    bool m_foundService;
-    QTimer *m_readTimer, *m_noteOnTimer;
+    QTimer *m_readTimer, *m_noteOnTimeout;
 		QElapsedTimer m_elapsed;
     bool m_connected;
     void searchCharacteristic();
     int m_currentService;
     QLowEnergyService::WriteMode m_writeMode;
-		void checkNoteOnTooLong();
-		void sendNoteOff(u8, u8);
+		void checkNoteOnTimeout();
+		const QByteArray& sendNoteOff(u8, u8);
+		void startTimer();
 };
 
 #endif // BLEINTERFACE_H

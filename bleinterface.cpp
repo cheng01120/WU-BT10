@@ -59,7 +59,7 @@ BLEInterface::BLEInterface(QObject *parent) : QObject(parent),
     m_control(0),
     m_service(0),
     m_readTimer(0),
-		m_noteOnTimer(0),
+		m_noteOnTimeout(0),
     m_connected(false),
     m_currentService(0)
 {
@@ -224,14 +224,10 @@ void BLEInterface::onServiceScanDone()
         qInfo("All services discovered.");
 
 				openVirtualMIDIPort();
-				m_elapsed.start();
-				if(!m_noteOnTimer){
-						m_noteOnTimer = new QTimer(this);
-						connect(m_noteOnTimer, &QTimer::timeout, this, &BLEInterface::checkNoteOnTooLong);
-						m_noteOnTimer->start(MAX_NOTE_ON_MS);
-				}
+				startTimer();
     }
 }
+
 
 
 void BLEInterface::disconnectDevice()
@@ -239,8 +235,8 @@ void BLEInterface::disconnectDevice()
     m_readTimer->deleteLater();
     m_readTimer = NULL;
 
-		m_noteOnTimer->deleteLater();
-		m_noteOnTimer = NULL;
+		m_noteOnTimeout->deleteLater();
+		m_noteOnTimeout = NULL;
 
 		closeVirtualMIDIPort();
 
@@ -274,11 +270,14 @@ void BLEInterface::onCharacteristicChanged(const QLowEnergyCharacteristic &c,
 
 void BLEInterface::parseBLEPacket(const QByteArray& value)
 {
+	if(!portOpened) return;
+
 	u8 ss = value.size() -1;
 	if(ss & 0x03)  {
 		qWarning() << "Unsupported message : " << value.toHex(':').toUpper();
 		return;
 	}
+
 
 	u8 high = value[0] & 0b00111111;
 	u8 low  = value[1] & 0b01111111;
@@ -298,7 +297,7 @@ void BLEInterface::parseBLEPacket(const QByteArray& value)
 		if((st == 0x90) && vel) { // note on 
 			for(int i = 0; i < events.size(); i++) {
 				if((events[i].key == key) && (events[i].channel == channel)) {
-					qWarning() << "Repeat Note on for key: " << events[i].key;
+					qWarning() << "Repeated Note on for key: " << events[i].key;
 					sendNoteOff(key, channel);
 					events.removeAt(i);
 					break;
@@ -317,7 +316,7 @@ void BLEInterface::parseBLEPacket(const QByteArray& value)
 			//qInfo() << "No. of keys is staill on: " << events.size();
 		}
 
-		Sleep(t1 - t0);
+		if( (t1 - t0) > 0) Sleep(t1 - t0);
 		QByteArray message(value.data() + i + 1, 3);
 	  if (!virtualMIDISendData(port, (u8 *)message.data(), 3)) {
 			qWarning() << "Unable to send midi message: " << message.toHex(':').toUpper();
@@ -405,7 +404,7 @@ void BLEInterface::searchCharacteristic(){
 
 void BLEInterface::onServiceStateChanged(QLowEnergyService::ServiceState s)
 {
-    //qDebug() << "serviceStateChanged, state: " << s;
+    qDebug() << "serviceStateChanged, state: " << s;
     if (s == QLowEnergyService::ServiceDiscovered) {
         searchCharacteristic();
     }
@@ -415,7 +414,7 @@ void BLEInterface::serviceError(QLowEnergyService::ServiceError e)
     qWarning() << "Service error:" << e;
 }
 
-void BLEInterface::checkNoteOnTooLong()
+void BLEInterface::checkNoteOnTimeout()
 {
 	if(events.isEmpty()) return;
 
@@ -433,10 +432,21 @@ void BLEInterface::checkNoteOnTooLong()
 	}
 }
 
-void BLEInterface::sendNoteOff(u8 key, u8 channel) {
-	u8 a[3];
+const QByteArray& BLEInterface::sendNoteOff(u8 key, u8 channel) {
+	static u8 a[3];
 	a[0] = 0x80 | channel;
 	a[1] = key;
-	a[2] = 0x80;
+	a[2] = 0x40;
 	virtualMIDISendData(port, a, 3);
+	return QByteArray((const char *)a, 3);
+}
+
+void BLEInterface::startTimer()
+{
+		m_elapsed.start();
+		if(!m_noteOnTimeout){
+				m_noteOnTimeout = new QTimer(this);
+				connect(m_noteOnTimeout, &QTimer::timeout, this, &BLEInterface::checkNoteOnTimeout);
+				m_noteOnTimeout->start(MAX_NOTE_ON_MS);
+		}
 }
